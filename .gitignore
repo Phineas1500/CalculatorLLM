@@ -1,0 +1,10 @@
+screenshots/
+CEmu.wiki/
+CalcData/
+venv/
+__pycache__/
+*.json
+*.png
+obj/
+README.md
+bin/
