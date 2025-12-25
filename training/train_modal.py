@@ -15,7 +15,7 @@ image = modal.Image.debian_slim(python_version="3.11").pip_install(
 
 @app.function(
     image=image,
-    gpu="A10G",
+    gpu="A100",
     timeout=1800,
     volumes={"/data": volume},
 )
@@ -29,8 +29,8 @@ def train_model(corpus_text: str, epochs: int = 50):
     import time
 
     VOCAB_SIZE = 95
-    EMBED_DIM = 64
-    HIDDEN_DIM = 64
+    EMBED_DIM = 128       # Large model, uses split AppVars
+    HIDDEN_DIM = 128      # Large model, uses split AppVars
     SEQ_LENGTH = 64
 
     class CharDataset(Dataset):
@@ -225,8 +225,7 @@ def main():
     output_path.write_bytes(weights_bytes)
     print(f"\nSaved weights to {output_path}")
 
-    # Convert to AppVar
+    # Convert to AppVar (using split script for large models)
     print("Converting to AppVar format...")
     import subprocess
-    subprocess.run(["python", "export_appvar.py", "model_weights.bin", "GRUMODEL.8xv"])
-    print("Done! Transfer GRUMODEL.8xv to your calculator.")
+    subprocess.run(["python3", "split_weights.py"])

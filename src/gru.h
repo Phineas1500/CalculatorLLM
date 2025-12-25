@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 #define VOCAB_SIZE 95
-#define HIDDEN_DIM 64
-#define EMBED_DIM 64
+#define HIDDEN_DIM 128
+#define EMBED_DIM 128
 
 #define PREACT_SHIFT 20
 
@@ -37,6 +37,11 @@ typedef struct {
   int16_t scale_q8;
 } GRU_Model;
 
+/* Initialize GRU model.
+ * If weights_data is NULL, assumes pointers in 'model' are already set
+ * (distributed load). If weights_data is provided, parses it as a single
+ * contiguous blob.
+ */
 void gru_init(GRU_Model *model, const uint8_t *weights_data);
 void gru_reset_hidden(GRU_Model *model);
 void gru_forward(GRU_Model *model, uint8_t input_char, int32_t *output);

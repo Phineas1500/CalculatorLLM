@@ -16,41 +16,49 @@ static int debug_step = 0;
 #define BIAS_SCALE 128
 
 void gru_init(GRU_Model *model, const uint8_t *weights_data) {
-  const uint8_t *ptr = weights_data;
-  /* Skip 4-byte float in weight file - ez80 sizeof(float)=6, but file uses 4 */
-  ptr += 4; /* Hardcode 4 bytes, NOT sizeof(float) which is 6 on ez80 */
+  /* Always set default scale if not loading from blob */
   model->scale_q8 = 236;
 
-  const int8_t *w = (const int8_t *)ptr;
-  model->embed = w;
-  w += EMBED_SIZE;
-  model->W_ir = w;
-  w += GATE_W_SIZE;
-  model->W_hr = w;
-  w += GATE_U_SIZE;
-  model->b_ir = w;
-  w += GATE_B_SIZE;
-  model->b_hr = w;
-  w += GATE_B_SIZE;
-  model->W_iz = w;
-  w += GATE_W_SIZE;
-  model->W_hz = w;
-  w += GATE_U_SIZE;
-  model->b_iz = w;
-  w += GATE_B_SIZE;
-  model->b_hz = w;
-  w += GATE_B_SIZE;
-  model->W_in = w;
-  w += GATE_W_SIZE;
-  model->W_hn = w;
-  w += GATE_U_SIZE;
-  model->b_in = w;
-  w += GATE_B_SIZE;
-  model->b_hn = w;
-  w += GATE_B_SIZE;
-  model->W_out = w;
-  w += OUTPUT_W_SIZE;
-  model->b_out = w;
+  /* If weights_data is provided, parse it as a single contiguous blob */
+  if (weights_data != NULL) {
+    const uint8_t *ptr = weights_data;
+    /* Skip 4-byte float in weight file - ez80 sizeof(float)=6, but file uses 4
+     */
+    ptr += 4; /* Hardcode 4 bytes, NOT sizeof(float) which is 6 on ez80 */
+
+    const int8_t *w = (const int8_t *)ptr;
+    model->embed = w;
+    w += EMBED_SIZE;
+    model->W_ir = w;
+    w += GATE_W_SIZE;
+    model->W_hr = w;
+    w += GATE_U_SIZE;
+    model->b_ir = w;
+    w += GATE_B_SIZE;
+    model->b_hr = w;
+    w += GATE_B_SIZE;
+    model->W_iz = w;
+    w += GATE_W_SIZE;
+    model->W_hz = w;
+    w += GATE_U_SIZE;
+    model->b_iz = w;
+    w += GATE_B_SIZE;
+    model->b_hz = w;
+    w += GATE_B_SIZE;
+    model->W_in = w;
+    w += GATE_W_SIZE;
+    model->W_hn = w;
+    w += GATE_U_SIZE;
+    model->b_in = w;
+    w += GATE_B_SIZE;
+    model->b_hn = w;
+    w += GATE_B_SIZE;
+    model->W_out = w;
+    w += OUTPUT_W_SIZE;
+    model->b_out = w;
+  }
+  /* Else: Distributed loading already set the pointers */
+
   gru_reset_hidden(model);
 }
 

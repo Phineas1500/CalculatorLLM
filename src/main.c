@@ -1,4 +1,5 @@
 #include <debug.h>
+#include <graphx.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,31 +7,119 @@
 #include <ti/screen.h>
 
 #include "gru.h"
+#include "memory.h"
 #include "model_io.h"
 
-#define MAX_GEN_CHARS 100
+#define MAX_GEN_CHARS 120
 #define ENABLE_DIAGNOSTICS 1
-#define SCREEN_COLS 26
-#define SCREEN_ROWS 10
+/* Screen dimensions for text in 8bpp mode (approx 8x8 font) */
+#define GFX_SCREEN_COLS (320 / 8)
+#define GFX_SCREEN_ROWS (240 / 10)
+#define FONT_HEIGHT 10
 
-static const char *prompts[] = {"The ", "To be or ", "Once upon ", "Hello ",
-                                "I think "};
+static const char *prompts[] = {"The ", "To be ", "I think ", "Hello ",
+                                "Once "};
 #define NUM_PROMPTS 5
+
+static void print_text_at(int x, int y, const char *str) {
+  gfx_SetTextXY(x, y);
+  gfx_PrintString(str);
+}
+
+static void print_centered(int y, const char *str) {
+  int w = gfx_GetStringWidth(str);
+  gfx_SetTextXY((320 - w) / 2, y);
+  gfx_PrintString(str);
+}
+
+static GRU_Model model;
+static uint8_t *weights_buffer = NULL;
+static int32_t output_logits[VOCAB_SIZE];
+
+/* Simple text cursor for continuous printing */
+static int cursor_x = 0;
+static int cursor_y = 0;
+
+static void newline(void) {
+  cursor_x = 0;
+  cursor_y += FONT_HEIGHT;
+  if (cursor_y > 230) {
+    cursor_y = 0;
+    gfx_FillScreen(255); /* Clear with white */
+    gfx_SetTextXY(0, 0);
+  }
+}
+
+static void print_char_gfx(char c) {
+  char str[2] = {c, '\0'};
+
+  if (c == '\n') {
+    newline();
+    return;
+  }
+
+  if (cursor_x + 8 > 320) {
+    newline();
+  }
+
+  gfx_SetTextXY(cursor_x, cursor_y);
+  gfx_PrintString(str);
+  cursor_x += gfx_GetStringWidth(str);
+}
+
+static void print_string_gfx(const char *str) {
+  while (*str) {
+    print_char_gfx(*str);
+    str++;
+  }
+}
 
 #if ENABLE_DIAGNOSTICS
 static void run_diagnostics(GRU_Model *m) {
-  char buf[40];
+  char buf[64];
   int32_t output[VOCAB_SIZE];
 
-  os_ClrHome();
-  os_PutStrLine("=== DIAGNOSTICS ===");
-  os_NewLine();
+  gfx_FillScreen(255);
+  cursor_x = 0;
+  cursor_y = 0;
+
+  print_string_gfx("=== DIAGNOSTICS ===");
+  newline();
 
   /* Show weight loading verification */
-  sprintf(buf, "embed[0][0..1]=%d,%d", (int)m->embed[0], (int)m->embed[1]);
-  os_PutStrLine(buf);
-  sprintf(buf, "b_out[0]=%d b_out[69]=%d", (int)m->b_out[0], (int)m->b_out[69]);
-  os_PutStrLine(buf);
+  /* embed is const int8_t*, cast to int for printing */
+  /* Note: embed might be NULL if load failed, but we checked that */
+  sprintf(buf, "embed size: %d", (int)MODEL_TOTAL_SIZE);
+  print_string_gfx(buf);
+  newline();
+
+  if (m->embed) {
+    sprintf(buf, "embed[0][0..1]=%d,%d", (int)m->embed[0], (int)m->embed[1]);
+    print_string_gfx(buf);
+    newline();
+  } else {
+    print_string_gfx("embed is NULL!");
+    newline();
+  }
+
+  print_string_gfx("Checking b_out...");
+  newline();
+  if (m->b_out) {
+    /* Print address for debugging */
+    sprintf(buf, "b_out ptr: %p", (void *)m->b_out);
+    print_string_gfx(buf);
+    newline();
+
+    sprintf(buf, "b_out[0]=%d", (int)m->b_out[0]);
+    print_string_gfx(buf);
+    newline();
+  } else {
+    print_string_gfx("b_out is NULL!");
+    newline();
+  }
+
+  print_string_gfx("Running Forward...");
+  newline();
 
   /* Process "The " and show hidden state */
   gru_reset_hidden(m);
@@ -41,267 +130,226 @@ static void run_diagnostics(GRU_Model *m) {
 
   sprintf(buf, "h[0..2]=%d,%d,%d", (int)m->hidden[0], (int)m->hidden[1],
           (int)m->hidden[2]);
-  os_PutStrLine(buf);
-  sprintf(buf, "h[3..5]=%d,%d,%d", (int)m->hidden[3], (int)m->hidden[4],
-          (int)m->hidden[5]);
-  os_PutStrLine(buf);
+  print_string_gfx(buf);
+  newline();
 
-  /* Show key output logits */
   sprintf(buf, "out[0]' '=%ld", (long)output[0]);
-  os_PutStrLine(buf);
-  sprintf(buf, "out[69]'e'=%ld", (long)output[69]);
-  os_PutStrLine(buf);
+  print_string_gfx(buf);
+  newline();
 
-  os_NewLine();
-  os_PutStrLine("Press any key...");
+  sprintf(buf, "out[69]'e'=%ld", (long)output[69]);
+  print_string_gfx(buf);
+  newline();
+
+  print_string_gfx("[Press Key]");
   while (!os_GetCSC())
     ;
 }
 #endif
-
-static GRU_Model model;
-static uint8_t *weights_buffer = NULL;
-static int32_t output_logits[VOCAB_SIZE];
-
-static uint8_t cursor_row = 0;
-static uint8_t cursor_col = 0;
-
-static void print_char_wrapped(char c) {
-  char str[2] = {c, '\0'};
-
-  if (c == '\n' || cursor_col >= SCREEN_COLS) {
-    cursor_col = 0;
-    cursor_row++;
-    if (cursor_row >= SCREEN_ROWS) {
-      cursor_row = 0;
-      os_ClrHome();
-    }
-    if (c == '\n')
-      return;
-  }
-
-  os_SetCursorPos(cursor_row, cursor_col);
-  os_PutStrFull(str);
-  cursor_col++;
-}
-
-static void print_string(const char *str) {
-  while (*str) {
-    print_char_wrapped(*str);
-    str++;
-  }
-}
 
 static void generate_text(const char *seed, uint8_t max_chars) {
   uint8_t i;
   uint8_t next_idx;
   char c;
   uint8_t chars_generated = 0;
-  uint16_t rand_seed = 12345; /* Random seed, increments each char */
-  sk_key_t key;
+  uint16_t rand_seed = 12345; /* Random seed */
 
-  dbg_printf("generate_text: seed='%s', max=%d\n", seed, max_chars);
+  gfx_FillScreen(255);
+  cursor_x = 0;
+  cursor_y = 0;
 
+  print_string_gfx("Seed: ");
+  print_string_gfx(seed);
+  newline();
+  newline();
+  print_string_gfx("Output:");
+  newline();
+
+  /* 1. Feed the seed prompt */
+  print_string_gfx(seed);
   gru_reset_hidden(&model);
 
-  print_string("Seed: ");
-  print_string(seed);
-  print_string("\n\nOutput:\n");
-
-  dbg_printf("Feeding seed through model...\n");
+  /* Process seed characters */
   for (i = 0; seed[i] != '\0'; i++) {
-    uint8_t idx = char_to_idx(seed[i]);
-    gru_forward(&model, idx, output_logits);
-    print_char_wrapped(seed[i]);
+    gru_forward(&model, (uint8_t)seed[i], output_logits);
   }
-  dbg_printf("Seed processed, starting generation\n");
 
+  /* Get last char to continue randomness */
+  rand_seed += (uint8_t)seed[i - 1];
+
+  /* 2. Generate new text */
   while (chars_generated < max_chars) {
-    key = os_GetCSC();
-    if (key == sk_Clear || key == sk_Enter) {
-      dbg_printf("User aborted generation\n");
-      break;
-    }
+    /* Sample next character using top-k=4 */
+    next_idx = gru_sample_topk(output_logits, 4, rand_seed++);
+    c = (char)next_idx;
 
-    next_idx = gru_sample_topk(output_logits, 4, rand_seed);
-    rand_seed += 7919; /* Prime increment for variety */
-    c = idx_to_char(next_idx);
-    print_char_wrapped(c);
+    print_char_gfx(c);
 
-#if ENABLE_DIAGNOSTICS
-    if (chars_generated < 3) {
-      int32_t max_l = output_logits[0];
-      int max_i = 0;
-      int j;
-      for (j = 1; j < VOCAB_SIZE; j++) {
-        if (output_logits[j] > max_l) {
-          max_l = output_logits[j];
-          max_i = j;
-        }
-      }
-      dbg_printf("Gen[%d]: idx=%d max_logit=%ld\n", chars_generated, max_i,
-                 (long)max_l);
-    }
-#endif
+    /* Stop at newline if desired, or just continue */
+    /* if (c == '\n') break; */
 
-    if (chars_generated < 5) {
-      dbg_printf("Generated[%d]: idx=%d char='%c'\n", chars_generated, next_idx,
-                 c);
-    }
-
+    /* Feed back into model */
     gru_forward(&model, next_idx, output_logits);
-
     chars_generated++;
   }
-  dbg_printf("Generated %d characters total\n", chars_generated);
+
+  newline();
+  newline();
+  print_string_gfx("[Press any key]");
+  while (!os_GetCSC())
+    ;
 }
 
 static int8_t show_menu(void) {
-  uint8_t i;
-  sk_key_t key;
+  int key;
 
-  os_ClrHome();
-  os_PutStrLine("=== Calculator LLM ===");
-  os_NewLine();
-  os_PutStrLine("Select a prompt:");
-  os_NewLine();
+  gfx_FillScreen(255);
 
-  for (i = 0; i < NUM_PROMPTS; i++) {
-    char line[30];
-    sprintf(line, "%d. \"%s...\"", i + 1, prompts[i]);
-    os_PutStrLine(line);
-  }
+  gfx_SetTextFGColor(0); /* Black text */
+  print_centered(10, "Calculator LLM v0.6");
+  print_centered(25, "128-hidden (120KB)");
 
-  os_NewLine();
-  os_PutStrLine("Press 1-5 or CLEAR to exit");
+  print_text_at(10, 50, "Select Prompt:");
 
-  while (1) {
-    key = os_GetCSC();
-    if (key == sk_Clear) {
-      return -1;
-    }
-    if (key == sk_1)
-      return 0;
-    if (key == sk_2)
-      return 1;
-    if (key == sk_3)
-      return 2;
-    if (key == sk_4)
-      return 3;
-    if (key == sk_5)
-      return 4;
-  }
+  print_text_at(20, 70, "1. The ...");
+  print_text_at(20, 85, "2. To be ...");
+  print_text_at(20, 100, "3. I think ...");
+  print_text_at(20, 115, "4. Hello ...");
+  print_text_at(20, 130, "5. Once ...");
+  print_text_at(20, 145, "6. Diagnostics");
+
+  print_centered(165, "Press 1-6 to generate");
+  print_centered(180, "Press Clear to exit");
+
+  while ((key = os_GetCSC()) == 0)
+    ;
+
+  if (key == sk_1)
+    return 0;
+  if (key == sk_2)
+    return 1;
+  if (key == sk_3)
+    return 2;
+  if (key == sk_4)
+    return 3;
+  if (key == sk_5)
+    return 4;
+  if (key == sk_6)
+    return 5; /* 5 is mapped to Diagnostics */
+
+  return -1;
 }
 
 int main(void) {
   const uint8_t *archive_ptr;
   int8_t selection;
-  char size_str[30];
+  char buf[64];
 
-  dbg_printf("=== CALCLLM Starting ===\n");
-  dbg_printf("MODEL_TOTAL_SIZE = %lu bytes\n", (unsigned long)MODEL_TOTAL_SIZE);
+  /* Initialize system */
+  mem_init(); /* Enters 8bpp graphics mode */
 
-  os_ClrHome();
-  os_PutStrLine("Calculator LLM v0.4");
-  os_PutStrLine("(pure integer Q15)");
-  os_NewLine();
+  /* Setup clean white background and black text */
+  /* gfx_SetPalette(palette_ptr, size, offset) - passing gfx_palette (default)
+   */
+  gfx_SetPalette(gfx_palette, 256, 0);
+  /* Actually mem_init does gfx_SetDrawBuffer, so let's check palette.
+     Default palette has 255 as white, 0 as black normally,
+     but let's just assume standard palette or use palette 0 (Black) and 255
+     (White) safely? Standard 8bpp palette: 255 is usually white. */
+  gfx_FillScreen(255);
+  gfx_SetTextFGColor(0);
+  gfx_SetTextBGColor(255);
+  // gfx_SetTextTransparentColor(255); // Optional
 
-  sprintf(size_str, "Model size: %lu KB",
-          (unsigned long)(MODEL_TOTAL_SIZE / 1024));
-  os_PutStrLine(size_str);
-  os_PutStrLine("Loading model...");
-  dbg_printf("Attempting to load model...\n");
+  print_centered(100, "Loading Calculator LLM...");
 
-  dbg_printf("Checking for archived model...\n");
-  archive_ptr = model_get_archive_ptr();
-
-  if (archive_ptr != NULL) {
-    dbg_printf("Found archived model at %p\n", (void *)archive_ptr);
-    os_PutStrLine("Using archived model");
+  /* Load Model Logic */
+  if ((archive_ptr = model_get_archive_ptr()) != NULL) {
     gru_init(&model, archive_ptr);
-    dbg_printf("gru_init completed (archive)\n");
-  } else {
-    dbg_printf("No archived model, checking RAM...\n");
-    if (!model_exists()) {
-      dbg_printf("ERROR: GRUMODEL appvar not found!\n");
-      os_PutStrLine("ERROR: GRUMODEL not found!");
-      os_NewLine();
-      os_PutStrLine("Please transfer the model");
-      os_PutStrLine("AppVar to your calculator.");
-      os_NewLine();
-      os_PutStrLine("Press any key to exit...");
+  } else if (model_exists_split()) {
+    print_centered(120, "Loading Split Model (120KB)...");
+
+    sprintf(buf, "Mn: &model=%p", (void *)&model);
+    gfx_SetTextXY(0, 10);
+    gfx_PrintString(buf);
+
+    /* Distributed load: Allocates tensors individually via model_io.c */
+    if (!model_load_distributed(&model)) {
+      print_centered(140, "Error: RAM/Load Failed");
+      mem_print_stats(); /* Only visible if debug enabled but good practice */
       while (!os_GetCSC())
         ;
-      return 1;
+      goto exit;
     }
 
-    dbg_printf("Model exists, allocating %lu bytes\n",
-               (unsigned long)MODEL_TOTAL_SIZE);
-    weights_buffer = (uint8_t *)malloc(MODEL_TOTAL_SIZE);
-    if (weights_buffer == NULL) {
-      dbg_printf("ERROR: malloc failed!\n");
-      os_PutStrLine("ERROR: Out of memory!");
-      os_NewLine();
-      os_PutStrLine("Press any key to exit...");
+    gfx_SetTextXY(0, 30);
+    sprintf(buf, "Mn: b=%p &b=%p", (void *)model.b_out, (void *)&model.b_out);
+    print_string_gfx(buf);
+    newline();
+    while (!os_GetCSC())
+      ; /* Pause to see it */
+
+    /* Initialize model struct (reset hidden state, pointers already set) */
+    gru_init(&model, NULL);
+  } else if (model_exists_split()) {
+    print_centered(120, "Loading Split Model (120KB)...");
+
+    sprintf(buf, "Mn: &model=%p", (void *)&model);
+    gfx_SetTextXY(0, 10);
+    gfx_PrintString(buf);
+
+    /* Distributed load: Allocates tensors individually via model_io.c */
+    if (!model_load_distributed(&model)) {
+      print_centered(140, "Error: RAM/Load Failed");
+      mem_print_stats();
       while (!os_GetCSC())
         ;
-      return 1;
+      goto exit;
     }
-    dbg_printf("Allocated buffer at %p\n", (void *)weights_buffer);
 
-    os_PutStrLine("Loading from RAM...");
-    dbg_printf("Calling model_load...\n");
-    if (!model_load(weights_buffer)) {
-      dbg_printf("ERROR: model_load failed!\n");
-      os_PutStrLine("ERROR: Failed to load!");
-      free(weights_buffer);
+    gfx_SetTextXY(0, 30);
+    sprintf(buf, "Mn: b=%p &b=%p", (void *)model.b_out, (void *)&model.b_out);
+    print_string_gfx(buf);
+    newline();
+    while (!os_GetCSC())
+      ; /* Pause to see it */
+
+    /* Initialize model struct (reset hidden state, pointers already set) */
+    gru_init(&model, NULL);
+  } else if (model_exists()) {
+    /* Fallback for single AppVar in RAM */
+    weights_buffer = (uint8_t *)tensor_alloc(MODEL_TOTAL_SIZE);
+    if (!weights_buffer || !model_load(weights_buffer)) {
+      print_centered(140, "Error: Load Failed");
       while (!os_GetCSC())
         ;
-      return 1;
+      goto exit;
     }
-    dbg_printf("model_load succeeded\n");
-
     gru_init(&model, weights_buffer);
-    dbg_printf("gru_init completed (RAM)\n");
-  }
-
-  dbg_printf("Model initialization complete!\n");
-  os_PutStrLine("Model loaded!");
-  os_NewLine();
-  os_PutStrLine("Press any key...");
-  while (!os_GetCSC())
-    ;
-
-#if ENABLE_DIAGNOSTICS
-  run_diagnostics(&model);
-#endif
-
-  dbg_printf("Entering main loop\n");
-  while (1) {
-    selection = show_menu();
-    if (selection < 0) {
-      dbg_printf("User selected exit\n");
-      break;
-    }
-
-    dbg_printf("User selected prompt %d: '%s'\n", selection,
-               prompts[selection]);
-    os_ClrHome();
-    cursor_row = 0;
-    cursor_col = 0;
-    generate_text(prompts[selection], MAX_GEN_CHARS);
-    dbg_printf("Generation complete\n");
-
-    os_NewLine();
-    os_NewLine();
-    print_string("\n[Press any key]");
+  } else {
+    print_centered(140, "Error: No Model Found");
+    print_centered(155, "Transfer GRUMDL1/2");
     while (!os_GetCSC())
       ;
+    goto exit;
   }
 
-  if (weights_buffer != NULL) {
-    free(weights_buffer);
+  /* Main Loop */
+  while (1) {
+    selection = show_menu();
+    if (selection < 0)
+      break;
+
+    if (selection == 5) {
+#if ENABLE_DIAGNOSTICS
+      run_diagnostics(&model);
+#endif
+    } else {
+      generate_text(prompts[selection], MAX_GEN_CHARS);
+    }
   }
 
+exit:
+  mem_cleanup(); /* Exits graphics mode */
   return 0;
 }

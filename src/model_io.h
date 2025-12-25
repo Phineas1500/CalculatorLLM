@@ -8,11 +8,20 @@
 /*
  * Model I/O for TI-84 Plus CE
  *
+ * Supports two loading modes:
+ * 1. Single AppVar (GRUMODEL) for models <= 64KB
+ * 2. Split AppVars (GRUMDL1 + GRUMDL2) for larger models
+ *
  * Format: [4-byte float scale] [int8 weights...]
- * Total size: 4 + 23,327 = 23,331 bytes
  */
 
+/* Single AppVar name (for smaller models) */
 #define MODEL_APPVAR_NAME "GRUMODEL"
+
+/* Split AppVar names (for larger models) */
+#define MODEL_APPVAR_PART1 "GRUMDL1"
+#define MODEL_APPVAR_PART2 "GRUMDL2"
+#define MODEL_SPLIT_SIZE 64000 /* Bytes in first AppVar */
 
 #define MODEL_NUM_WEIGHTS                                                      \
   ((VOCAB_SIZE * EMBED_DIM) +  /* embed */                                     \
@@ -32,12 +41,19 @@
    (VOCAB_SIZE)                /* b_out */                                     \
   )
 
-/* 4 bytes for scale (HARDCODED, not sizeof(float) which is 6 on ez80) + int8
- * weights */
+/* 4 bytes for scale (HARDCODED, not sizeof(float) which is 6 on ez80) */
 #define MODEL_TOTAL_SIZE (4 + MODEL_NUM_WEIGHTS)
+
+/* Check if model needs split loading */
+#define MODEL_NEEDS_SPLIT (MODEL_TOTAL_SIZE > 64000)
 
 bool model_load(uint8_t *buffer);
 bool model_exists(void);
 const uint8_t *model_get_archive_ptr(void);
+
+/* Split loading: returns combined pointer to weights (caller provides buffer)
+ */
+bool model_load_split(uint8_t *buffer);
+bool model_exists_split(void);
 
 #endif /* MODEL_IO_H */
