@@ -191,3 +191,74 @@ uint8_t gru_sample(const int32_t *output) {
   }
   return max_idx;
 }
+
+uint8_t gru_sample_topk(const int32_t *output, uint8_t k, uint16_t rand_seed) {
+  /* Find top-k candidates and randomly sample from them */
+  uint8_t top_idx[8]; /* Max k=8 */
+  int32_t top_val[8];
+  uint8_t i, j, num_top = 0;
+
+  if (k > 8)
+    k = 8;
+  if (k < 1)
+    k = 1;
+
+  /* Initialize with minimum values */
+  for (i = 0; i < k; i++) {
+    top_val[i] = -2147483647;
+    top_idx[i] = 0;
+  }
+
+  /* Find top-k values */
+  for (i = 0; i < VOCAB_SIZE; i++) {
+    /* Find position to insert */
+    for (j = 0; j < k; j++) {
+      if (output[i] > top_val[j]) {
+        /* Shift down */
+        uint8_t m;
+        for (m = k - 1; m > j; m--) {
+          top_val[m] = top_val[m - 1];
+          top_idx[m] = top_idx[m - 1];
+        }
+        top_val[j] = output[i];
+        top_idx[j] = i;
+        break;
+      }
+    }
+  }
+
+  /* Simple weighted random selection from top-k */
+  /* Use difference from top as inverse weight */
+  int32_t max_val = top_val[0];
+  uint16_t weights[8];
+  uint16_t total_weight = 0;
+
+  for (i = 0; i < k; i++) {
+    /* Weight = scaled difference from max (closer = higher weight) */
+    int32_t diff = max_val - top_val[i];
+    /* Use exponential-ish decay: weight = max(1, 256 - diff/16) */
+    if (diff < 0)
+      diff = 0;
+    int32_t w = 256 - (diff >> 4);
+    if (w < 1)
+      w = 1;
+    if (w > 256)
+      w = 256;
+    weights[i] = (uint16_t)w;
+    total_weight += weights[i];
+  }
+
+  /* Random selection using seed */
+  uint16_t r = (rand_seed * 1103515245 + 12345) & 0x7FFF;
+  r = r % total_weight;
+
+  uint16_t cumulative = 0;
+  for (i = 0; i < k; i++) {
+    cumulative += weights[i];
+    if (r < cumulative) {
+      return top_idx[i];
+    }
+  }
+
+  return top_idx[0]; /* Fallback */
+}

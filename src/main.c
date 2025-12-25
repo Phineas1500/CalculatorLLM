@@ -97,6 +97,7 @@ static void generate_text(const char *seed, uint8_t max_chars) {
   uint8_t next_idx;
   char c;
   uint8_t chars_generated = 0;
+  uint16_t rand_seed = 12345; /* Random seed, increments each char */
   sk_key_t key;
 
   dbg_printf("generate_text: seed='%s', max=%d\n", seed, max_chars);
@@ -122,7 +123,8 @@ static void generate_text(const char *seed, uint8_t max_chars) {
       break;
     }
 
-    next_idx = gru_sample(output_logits);
+    next_idx = gru_sample_topk(output_logits, 5, rand_seed);
+    rand_seed += 7919; /* Prime increment for variety */
     c = idx_to_char(next_idx);
     print_char_wrapped(c);
 
