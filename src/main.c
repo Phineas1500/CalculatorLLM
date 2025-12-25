@@ -171,7 +171,7 @@ static void generate_text(const char *seed, uint8_t max_chars) {
 
   /* Process seed characters */
   for (i = 0; seed[i] != '\0'; i++) {
-    gru_forward(&model, (uint8_t)seed[i], output_logits);
+    gru_forward(&model, char_to_idx(seed[i]), output_logits);
   }
 
   /* Get last char to continue randomness */
@@ -181,7 +181,7 @@ static void generate_text(const char *seed, uint8_t max_chars) {
   while (chars_generated < max_chars) {
     /* Sample next character using top-k=4 */
     next_idx = gru_sample_topk(output_logits, 4, rand_seed++);
-    c = (char)next_idx;
+    c = idx_to_char(next_idx);
 
     print_char_gfx(c);
 

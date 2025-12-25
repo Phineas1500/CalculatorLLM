@@ -10,6 +10,7 @@
 #define PREACT_SHIFT 20
 
 typedef struct {
+  /* Global scale (not used in integer math, but stored for reference) */
   float scale;
 
   const int8_t *embed;
@@ -33,8 +34,6 @@ typedef struct {
   const int8_t *b_out;
 
   int8_t hidden[HIDDEN_DIM];
-
-  int16_t scale_q8;
 } GRU_Model;
 
 /* Initialize GRU model.

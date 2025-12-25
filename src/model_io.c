@@ -89,7 +89,6 @@ static bool load_tensor(SplitReader *r, int8_t **ptr_ref, size_t size) {
 
   /* Read data into it */
   if (!reader_read(r, *ptr_ref, size)) {
-    /* Read failed, error already printed in reader_read */
     return false;
   }
 
@@ -98,21 +97,14 @@ static bool load_tensor(SplitReader *r, int8_t **ptr_ref, size_t size) {
 
 bool model_load_distributed(GRU_Model *m) {
   SplitReader reader;
-  float scale;
   char buf[64];
-  int count = 0;
-
-  /* dbg_printf("model_load_distributed: starting\n"); */
 
   if (!reader_init(&reader)) {
-    /* dbg_printf("Failed to open split AppVars\n"); */
     return false;
   }
 
-  /* Read Scale (4 bytes) */
-  /* Note: We read it but don't use it in int-only inference yet,
-     or we could store it if needed later. For now just consume bytes. */
-  if (!reader_read(&reader, &scale, 4)) {
+  /* Read global scale (4 bytes) - stored but not used in int math */
+  if (!reader_read(&reader, &m->scale, 4)) {
     reader_close(&reader);
     return false;
   }
@@ -121,55 +113,42 @@ bool model_load_distributed(GRU_Model *m) {
   /* embed */
   if (!load_tensor(&reader, &m->embed, VOCAB_SIZE * EMBED_DIM))
     goto error;
-  count++;
 
-  /* GRU Layer 1 (ih_l0) - Split into 3 chunks: ir, iz, in */
+  /* GRU Layer 1 - Reset gate */
   if (!load_tensor(&reader, &m->W_ir, HIDDEN_DIM * EMBED_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->W_hr, HIDDEN_DIM * HIDDEN_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->b_ir, HIDDEN_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->b_hr, HIDDEN_DIM))
     goto error;
-  count++;
 
+  /* GRU Layer 1 - Update gate */
   if (!load_tensor(&reader, &m->W_iz, HIDDEN_DIM * EMBED_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->W_hz, HIDDEN_DIM * HIDDEN_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->b_iz, HIDDEN_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->b_hz, HIDDEN_DIM))
     goto error;
-  count++;
 
+  /* GRU Layer 1 - New gate */
   if (!load_tensor(&reader, &m->W_in, HIDDEN_DIM * EMBED_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->W_hn, HIDDEN_DIM * HIDDEN_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->b_in, HIDDEN_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->b_hn, HIDDEN_DIM))
     goto error;
-  count++;
 
   /* Output Layer */
   if (!load_tensor(&reader, &m->W_out, VOCAB_SIZE * HIDDEN_DIM))
     goto error;
-  count++;
   if (!load_tensor(&reader, &m->b_out, VOCAB_SIZE))
     goto error;
-  count++;
 
   /* Visual Debugging - Success */
   gfx_SetTextXY(0, 20);
@@ -188,12 +167,8 @@ bool model_load_distributed(GRU_Model *m) {
 
 error:
   reader_close(&reader);
-  /* Note: We should probably free memory here, but tensor_reset() in main
-   * handles it on failure */
-  /* dbg_printf("model_load_distributed: failed\n"); */
   gfx_SetTextXY(0, 100);
-  sprintf(buf, "IO: Err at #%d", count);
-  gfx_PrintString(buf);
+  gfx_PrintString("IO: Load Error!");
   while (os_GetCSC())
     ;
   while (!os_GetCSC())

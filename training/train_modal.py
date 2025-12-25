@@ -109,7 +109,7 @@ def train_model(corpus_text: str, epochs: int = 50):
     optimizer = optim.Adam(model.parameters(), lr=0.002)
     criterion = nn.CrossEntropyLoss()
 
-    print(f"\n=== Training for {epochs} epochs (no clipping) ===\n")
+    print(f"\n=== Training for {epochs} epochs (with weight clipping to [-1,1]) ===\n")
     start_time = time.time()
 
     for epoch in range(epochs):
@@ -125,6 +125,12 @@ def train_model(corpus_text: str, epochs: int = 50):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            
+            # Clip weights to [-1, 1] for quantization-friendly range
+            with torch.no_grad():
+                for param in model.parameters():
+                    param.clamp_(-1.0, 1.0)
+            
             total_loss += loss.item()
 
         epoch_time = time.time() - epoch_start
@@ -168,25 +174,27 @@ def train_model(corpus_text: str, epochs: int = 50):
         ("W_out", W_out), ("b_out", b_out),
     ]
 
-    # Find global scale factor
+    # Global quantization - works because weights are clipped to [-1, 1]
+    import struct
+    
+    # With weight clipping, global scale should be ~1.0
     all_flat = torch.cat([t.flatten() for _, t in tensors])
     global_scale = all_flat.abs().max().item()
-    print(f"\nGlobal scale factor: {global_scale:.4f}")
-
-    # Quantize all weights to int8
+    print(f"\nGlobal scale factor: {global_scale:.4f} (should be ~1.0 with clipping)")
+    
     def quantize(t):
+        """Quantize tensor to int8 using global scale."""
         scaled = t / global_scale * 127.0
         return scaled.clamp(-127, 127).round().to(torch.int8).numpy()
 
+    print("\n=== Quantized Weight Tensors ===")
     all_weights = []
-    print("\n=== Quantized weight tensors ===")
     for name, tensor in tensors:
         q = quantize(tensor).flatten()
         all_weights.append(q)
         print(f"{name}: shape={tensor.shape}, {len(q)} bytes")
 
     # Pack: 4-byte float scale + int8 weights
-    import struct
     scale_bytes = struct.pack('<f', global_scale)
     weight_bytes = scale_bytes + np.concatenate(all_weights).tobytes()
     print(f"\nTotal: {len(weight_bytes)} bytes ({len(weight_bytes)/1024:.1f} KB)")
