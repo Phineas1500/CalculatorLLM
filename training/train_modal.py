@@ -29,8 +29,8 @@ def train_model(corpus_text: str, epochs: int = 50):
     import time
 
     VOCAB_SIZE = 95
-    EMBED_DIM = 48
-    HIDDEN_DIM = 48
+    EMBED_DIM = 64
+    HIDDEN_DIM = 64
     SEQ_LENGTH = 64
 
     class CharDataset(Dataset):
@@ -218,7 +218,7 @@ def main():
 
     # Train on Modal
     print("\nStarting training on Modal GPU...")
-    weights_bytes = train_model.remote(corpus_text, epochs=30)
+    weights_bytes = train_model.remote(corpus_text, epochs=50)
 
     # Save weights locally
     output_path = Path("model_weights.bin")

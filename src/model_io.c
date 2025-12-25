@@ -59,7 +59,7 @@ const uint8_t *model_get_archive_ptr(void) {
   }
 
   ptr = (uint8_t *)ti_GetDataPtr(handle);
-  /* ti_GetDataPtr returns pointer to AppVar data content - no extra skip needed
+  /* convbin-generated: ti_GetDataPtr returns pointer to data content directly
    */
 
   dbg_printf("model_get_archive_ptr: archive ptr=%p\n", (void *)ptr);

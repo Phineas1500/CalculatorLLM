@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 #define VOCAB_SIZE 95
-#define HIDDEN_DIM 48
-#define EMBED_DIM 48
+#define HIDDEN_DIM 64
+#define EMBED_DIM 64
 
 #define PREACT_SHIFT 20
 

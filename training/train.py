@@ -20,8 +20,8 @@ from pathlib import Path
 
 # Model hyperparameters (must match C code)
 VOCAB_SIZE = 95      # Printable ASCII: space (32) to tilde (126)
-EMBED_DIM = 48
-HIDDEN_DIM = 48
+EMBED_DIM = 64       # Increased for better capacity
+HIDDEN_DIM = 64      # Increased for better capacity
 SEQ_LENGTH = 64      # Training sequence length
 
 

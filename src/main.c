@@ -123,7 +123,7 @@ static void generate_text(const char *seed, uint8_t max_chars) {
       break;
     }
 
-    next_idx = gru_sample_topk(output_logits, 5, rand_seed);
+    next_idx = gru_sample_topk(output_logits, 4, rand_seed);
     rand_seed += 7919; /* Prime increment for variety */
     c = idx_to_char(next_idx);
     print_char_wrapped(c);
