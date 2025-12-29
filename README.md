@@ -1,1 +1,1 @@
-<iframe width="429" height="762" src="https://www.youtube.com/embed/ZQMHnEoswfw" title="AI on a calculator" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+[![Watch the video](https://img.youtube.com/vi/ZQMHnEoswfw/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZQMHnEoswfw)
